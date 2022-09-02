@@ -2,9 +2,10 @@ FROM golang:1.17 as ext-preloader
 
 ADD ext-preloader /src
 WORKDIR /src
-RUN go build -o /ext-preloader main.go 
+RUN go build -o /ext-preloader main.go
 
-FROM debian:stable-slim
+FROM gcr.io/cloudshell-images/cloudshell:latest
+# debian:stable-slim
 
 LABEL maintainer="X-Truder <dev@x-truder.net>"
 
@@ -53,12 +54,20 @@ RUN groupadd --gid ${USER_GID} ${USERNAME} && \
     echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/devcontainer && \
     chmod 0440 /etc/sudoers.d/devcontainer
 
-# copy nix configuration
+# # copy nix configuration
 COPY etc/nix.conf /etc/nix/nix.conf
 
-# install nix
+# # install nix
 ARG NIX_INSTALL_SCRIPT=https://nixos.org/nix/install
 RUN curl -L ${NIX_INSTALL_SCRIPT} | sudo -u ${USERNAME} NIX_INSTALLER_NO_MODIFY_PROFILE=1 sh
+
+# This is needed to get the google cloud shell to launch. It appears, there must be no
+# 1000:1000 user in the image.
+RUN rm /etc/sudoers.d/devcontainer
+RUN cp /home/${USERNAME}/.nix-channels /etc/skel/
+RUN cp -av /home/${USERNAME}/.nix-profile /etc/skel/
+RUN cp -av /home/${USERNAME}/.nix-defexpr /etc/skel/
+RUN userdel ${USERNAME}
 
 # install devcontainer extra profile that loads nix and has vscode user env probe
 COPY etc/devcontainer.sh /etc/profile.d/devcontainer.sh
@@ -73,31 +82,39 @@ ENV ENV="/etc/envrc" BASH_ENV="/etc/envrc"
 # copy direnv config and set conig path
 COPY etc/direnv.toml /etc
 ENV DIRENV_CONFIG=/etc
+RUN echo 'if [ -d "$HOME/.nix-profile/bin" ] ; then' >> /etc/skel/.bashrc
+RUN echo '    PATH="$HOME/.nix-profile/bin:$PATH"'  >> /etc/skel/.bashrc
+RUN echo 'fi'                                         >> /etc/skel/.bashrc
+RUN echo 'ENV=/etc/envrc' >> /etc/skel/.bashrc
+RUN echo 'BASH_ENV=/etc/envrc' >> /etc/skel/.bashrc
+RUN echo 'DIRENV_CONFIG=/etc' >> /etc/skel/.bashrc
 
-COPY --from=ext-preloader /ext-preloader /usr/bin/ext-preloader
-COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN mkdir /etc/skel/.config/direnv && cp etc/direnv.toml /etc/skel/.config/direnv
+
+# COPY --from=ext-preloader /ext-preloader /usr/bin/ext-preloader
+# COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 # set defaut user, can be changed via ONBUILD triggers
-USER ${USERNAME}
-ENTRYPOINT [ "/docker-entrypoint.sh" ]
+# USER ${USERNAME}
+# # ENTRYPOINT [ "/docker-entrypoint.sh" ]
 
-ONBUILD USER root
+# ONBUILD USER root
 
 # Arguments for username and user_uid and user_gid that can be changed
-ONBUILD ARG USERNAME=code
-ONBUILD ARG USER_UID=1000
-ONBUILD ARG USER_GID=${USER_UID}
+# ONBUILD ARG USERNAME=code
+# ONBUILD ARG USER_UID=1000
+# ONBUILD ARG USER_GID=${USER_UID}
 
-# onbuild uid and gid fixes
-ONBUILD RUN \
-    if [ -z ${USER_UID} ] || [ -z ${USER_UID} ] || [ -z ${USERNAME} ]; then exit 0; fi && \
-    set -x && \
-    if [ "$(id -u code)" != "${USER_UID}" ] || [ "$(id -g code)" != "${USER_GID}" ]; then \
-        groupmod -g ${USER_GID} -n ${USERNAME} code || true && \
-        usermod -u ${USER_UID} -g ${USER_GID} -l ${USERNAME} -m -d /home/${USERNAME} code && \
-        chown -R ${USER_UID}:${USER_GID} /nix && \
-        chown -R ${USER_UID}:${USER_GID} /home/${USERNAME} && \
-        echo ${USERNAME} ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/devcontainer; \
-    fi
+# # onbuild uid and gid fixes
+# ONBUILD RUN \
+#     if [ -z ${USER_UID} ] || [ -z ${USER_UID} ] || [ -z ${USERNAME} ]; then exit 0; fi && \
+#     set -x && \
+#     if [ "$(id -u code)" != "${USER_UID}" ] || [ "$(id -g code)" != "${USER_GID}" ]; then \
+#         groupmod -g ${USER_GID} -n ${USERNAME} code || true && \
+#         usermod -u ${USER_UID} -g ${USER_GID} -l ${USERNAME} -m -d /home/${USERNAME} code && \
+#         chown -R ${USER_UID}:${USER_GID} /nix && \
+#         chown -R ${USER_UID}:${USER_GID} /home/${USERNAME} && \
+#         echo ${USERNAME} ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/devcontainer; \
+#     fi
 
-ONBUILD USER ${USERNAME}
+# ONBUILD USER ${USERNAME}
